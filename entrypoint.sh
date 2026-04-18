@@ -74,16 +74,17 @@ cleanup_llm_output() {
   local html_dir="$1"
 
   if [[ ! -d "${html_dir}" ]]; then
-  return
+    return
   fi
 
   if ! find "${html_dir}" -name '*.html.md' -print -quit | grep -q .; then
-  return
+    return
   fi
 
   echo ":: Normalizing sphinx-llm markdown output"
   python3 - "${html_dir}" <<'PYEOF'
 from pathlib import Path
+import html as html_lib
 import re
 import sys
 
@@ -91,118 +92,184 @@ html_dir = Path(sys.argv[1])
 md_files = sorted(html_dir.rglob("*.html.md"))
 
 if not md_files:
-  raise SystemExit(0)
+    raise SystemExit(0)
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 SCRIPT_RE = re.compile(r"<script\b.*?</script>", re.IGNORECASE | re.DOTALL)
 STYLE_RE = re.compile(r"<style\b.*?</style>", re.IGNORECASE | re.DOTALL)
-ANCHOR_RE = re.compile(r"^\s*<a\b[^>]*>\s*</a>\s*$", re.IGNORECASE)
-TAG_RE = re.compile(r"<[^>]+>")
+HTML_IMAGE_RE = re.compile(r"<img\b([^>]*?)\bsrc=[\"']([^\"']+)[\"']([^>]*)>", re.IGNORECASE | re.DOTALL)
+HTML_LINK_RE = re.compile(r"<a\b([^>]*?)\bhref=[\"']([^\"']+)[\"']([^>]*)>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+HEADING_RE = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
+LINE_BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+LIST_ITEM_OPEN_RE = re.compile(r"<li\b[^>]*>", re.IGNORECASE)
+LIST_ITEM_CLOSE_RE = re.compile(r"</li>", re.IGNORECASE)
+BLOCK_TAG_RE = re.compile(
+    r"</?(?:main|section|article|header|footer|nav|div|p|ul|ol|figure|figcaption|table|thead|tbody|tr|td|th)\b[^>]*>",
+    re.IGNORECASE,
+)
+NOSCRIPT_TAG_RE = re.compile(r"</?noscript\b[^>]*>", re.IGNORECASE)
+GENERIC_TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
+FENCE_RE = re.compile(r"(^```.*?^```[ \t]*$)", re.MULTILINE | re.DOTALL)
+BLANK_LINE_RE = re.compile(r"\n{3,}")
 BULLET_START_RE = re.compile(r"^(\s*)\*\s+")
 INLINE_BULLET_RE = re.compile(r"(?<!\n)\s+\*\s+(?=(?:\[|[A-Za-z0-9`]))")
+ADJACENT_IMAGE_RE = re.compile(r"\)(?=!\[)")
 
 
 def sort_key(path: Path) -> tuple[int, str]:
-  rel = path.relative_to(html_dir).as_posix()
-  return (0 if rel == "index.html.md" else 1, rel)
+    rel = path.relative_to(html_dir).as_posix()
+    return (0 if rel == "index.html.md" else 1, rel)
+
+
+def plain_text(fragment: str) -> str:
+    fragment = LINE_BREAK_RE.sub("\n", fragment)
+    fragment = LIST_ITEM_OPEN_RE.sub("- ", fragment)
+    fragment = LIST_ITEM_CLOSE_RE.sub("\n", fragment)
+    fragment = BLOCK_TAG_RE.sub("\n", fragment)
+    fragment = NOSCRIPT_TAG_RE.sub("\n", fragment)
+    fragment = GENERIC_TAG_RE.sub("", fragment)
+    fragment = html_lib.unescape(fragment)
+    return WS_RE.sub(" ", fragment).strip()
+
+
+def clean_fragment(text: str) -> str:
+    text = COMMENT_RE.sub("", text)
+    text = SCRIPT_RE.sub("", text)
+    text = STYLE_RE.sub("", text)
+    text = NOSCRIPT_TAG_RE.sub("\n", text)
+
+    def replace_image(match: re.Match[str]) -> str:
+        attrs = f"{match.group(1)} {match.group(3)}"
+        alt_match = re.search(r'\balt=[\"\']([^\"\']*)[\"\']', attrs, re.IGNORECASE)
+        alt_text = plain_text(alt_match.group(1)) if alt_match else "image"
+        alt_text = alt_text or "image"
+        return f"![{alt_text}]({match.group(2).strip()})"
+
+    def replace_link(match: re.Match[str]) -> str:
+        href = match.group(2).strip()
+        label = plain_text(match.group(4))
+        if not href:
+            return label
+        if not label:
+            return href
+        return f"[{label}]({href})"
+
+    def replace_heading(match: re.Match[str]) -> str:
+        level = int(match.group(1))
+        label = plain_text(match.group(2))
+        if not label:
+            return "\n"
+        return f"\n\n{'#' * level} {label}\n\n"
+
+    text = HTML_IMAGE_RE.sub(replace_image, text)
+    text = HTML_LINK_RE.sub(replace_link, text)
+    text = HEADING_RE.sub(replace_heading, text)
+    text = LINE_BREAK_RE.sub("\n", text)
+    text = LIST_ITEM_OPEN_RE.sub("\n- ", text)
+    text = LIST_ITEM_CLOSE_RE.sub("\n", text)
+    text = BLOCK_TAG_RE.sub("\n", text)
+    text = GENERIC_TAG_RE.sub("", text)
+    text = html_lib.unescape(text)
+    text = ADJACENT_IMAGE_RE.sub(")\n", text)
+    text = INLINE_BULLET_RE.sub("\n- ", text)
+
+    cleaned_lines = []
+    blank_run = 0
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        line = BULLET_START_RE.sub(r"\1- ", line)
+        line = re.sub(r"\s{2,}", " ", line).rstrip()
+
+        if line.strip():
+            blank_run = 0
+            cleaned_lines.append(line)
+        else:
+            blank_run += 1
+            if blank_run <= 1:
+                cleaned_lines.append("")
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    cleaned = BLANK_LINE_RE.sub("\n\n", cleaned)
+    return f"{cleaned}\n" if cleaned else ""
 
 
 def clean_markdown(text: str) -> str:
-  text = COMMENT_RE.sub("", text)
-  text = SCRIPT_RE.sub("", text)
-  text = STYLE_RE.sub("", text)
+    parts = FENCE_RE.split(text)
+    cleaned_parts = []
 
-  # Normalize markdown lists so downstream llms.txt generation sees a stable
-  # structure even when the markdown builder emits '*' bullets inline.
-  text = INLINE_BULLET_RE.sub("\n- ", text)
+    for index, part in enumerate(parts):
+        cleaned_parts.append(part if index % 2 else clean_fragment(part))
 
-  cleaned_lines = []
-  blank_run = 0
-
-  for raw_line in text.splitlines():
-    line = raw_line.rstrip()
-    if ANCHOR_RE.match(line):
-      continue
-
-    line = BULLET_START_RE.sub(r"\1- ", line)
-
-    if line.strip():
-      blank_run = 0
-      cleaned_lines.append(line)
-    else:
-      blank_run += 1
-      if blank_run <= 1:
-        cleaned_lines.append("")
-
-  cleaned = "\n".join(cleaned_lines).strip()
-  return f"{cleaned}\n" if cleaned else ""
+    cleaned = "".join(cleaned_parts).strip()
+    cleaned = BLANK_LINE_RE.sub("\n\n", cleaned)
+    return f"{cleaned}\n" if cleaned else ""
 
 
 def extract_title(text: str, path: Path) -> str:
-  for raw_line in text.splitlines():
-    line = raw_line.strip()
-    if line.startswith("#"):
-      return line.lstrip("#").strip()
-  return path.stem.replace(".html", "").replace("_", " ").title()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("#"):
+            return line.lstrip("#").strip()
+    return path.stem.replace(".html", "").replace("_", " ").title()
 
 
 def normalize_text(line: str) -> str:
-  line = TAG_RE.sub("", line)
-  return WS_RE.sub(" ", line).strip()
+    line = GENERIC_TAG_RE.sub("", line)
+    line = html_lib.unescape(line)
+    return WS_RE.sub(" ", line).strip()
 
 
 def extract_description(text: str) -> str:
-  for raw_line in text.splitlines():
-    line = raw_line.strip()
-    if not line:
-      continue
-    if line.startswith("#"):
-      continue
-    if line.startswith(("* ", "- ")):
-      continue
-    if line.startswith(".."):
-      continue
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            continue
+        if line.startswith(("* ", "- ", "..", "![", "|")):
+            continue
 
-    line = normalize_text(line)
-    if not line:
-      continue
-    if len(line) < 20:
-      continue
+        line = normalize_text(line)
+        if not line:
+            continue
+        if len(line) < 20:
+            continue
 
-    return f"{line[:100]}..." if len(line) > 100 else line
+        return f"{line[:100]}..." if len(line) > 100 else line
 
-  return "Page content"
+    return "Page content"
 
 
 md_files.sort(key=sort_key)
-cleaned_by_path: dict[Path, str] = {}
+cleaned_by_path = {}
 
 for path in md_files:
-  cleaned = clean_markdown(path.read_text(encoding="utf-8"))
-  path.write_text(cleaned, encoding="utf-8")
-  cleaned_by_path[path] = cleaned
+    cleaned = clean_markdown(path.read_text(encoding="utf-8"))
+    path.write_text(cleaned, encoding="utf-8")
+    cleaned_by_path[path] = cleaned
 
 llms_path = html_dir / "llms.txt"
 with llms_path.open("w", encoding="utf-8") as llms_file:
-  llms_file.write("# Zephyr Project\n\n")
-  llms_file.write("> Zephyr Project Documentation\n\n\n")
-  llms_file.write("2015-2026 Zephyr Project members and individual contributors\n\n")
-  llms_file.write("## Pages\n\n")
+    llms_file.write("# Zephyr Project\n\n")
+    llms_file.write("> Zephyr Project Documentation\n\n\n")
+    llms_file.write("2015-2026 Zephyr Project members and individual contributors\n\n")
+    llms_file.write("## Pages\n\n")
 
-  for path in md_files:
-    rel_path = path.relative_to(html_dir).as_posix()
-    cleaned = cleaned_by_path[path]
-    title = extract_title(cleaned, path)
-    desc = extract_description(cleaned)
-    llms_file.write(f"- [{title}]({rel_path}): {desc}\n")
+    for path in md_files:
+        rel_path = path.relative_to(html_dir).as_posix()
+        cleaned = cleaned_by_path[path]
+        title = extract_title(cleaned, path)
+        desc = extract_description(cleaned)
+        llms_file.write(f"- [{title}]({rel_path}): {desc}\n")
 
 llms_full_path = html_dir / "llms-full.txt"
 with llms_full_path.open("w", encoding="utf-8") as llms_full_file:
-  for path in md_files:
-    rel_path = path.relative_to(html_dir).as_posix()
-    cleaned = cleaned_by_path[path].rstrip()
-    llms_full_file.write(f"# {rel_path}\n\n{cleaned}\n\n")
+    for path in md_files:
+        rel_path = path.relative_to(html_dir).as_posix()
+        cleaned = cleaned_by_path[path].rstrip()
+        llms_full_file.write(f"# {rel_path}\n\n{cleaned}\n\n")
 PYEOF
 }
 
@@ -222,110 +289,127 @@ export_markdown_bundle() {
   rm -rf "${markdown_dir}" "${markdown_tar}"
   mkdir -p "${markdown_dir}"
 
-    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" <<'PYEOF'
-  from os import path as ospath
+  python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" <<'PYEOF'
+from os import path as ospath
 from pathlib import Path
-  import re
+import re
 import shutil
 import sys
 
 html_dir = Path(sys.argv[1])
 markdown_dir = Path(sys.argv[2])
-  repo_root = Path(sys.argv[3])
-  build_src_dir = Path(sys.argv[4])
+repo_root = Path(sys.argv[3])
+build_src_dir = Path(sys.argv[4])
 
-  copied_assets: dict[Path, Path] = {}
-  page_files: list[Path] = []
+copied_assets = {}
+page_files = []
 
-  MD_IMAGE_RE = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)([^)]*)\)')
-  HTML_IMAGE_RE = re.compile(r'(<img\b[^>]*?\bsrc=["\'])([^"\']+)(["\'])', re.IGNORECASE)
+MD_IMAGE_RE = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)([^)]*)\)')
+MD_LINK_RE = re.compile(r'(?<!!)\[([^\]]+)\]\(([^)\s]+)([^)]*)\)')
+HTML_IMAGE_RE = re.compile(r'(<img\b[^>]*?\bsrc=["\'])([^"\']+)(["\'])', re.IGNORECASE)
 
 
-  def is_external(ref: str) -> bool:
+def is_external(ref: str) -> bool:
     return ref.startswith(("http://", "https://", "data:", "mailto:", "#"))
 
 
-  def normalize_relpath(target: Path, from_dir: Path) -> str:
+def split_ref(ref: str) -> tuple[str, str]:
+    match = re.match(r'([^?#]*)(.*)', ref)
+    if match is None:
+        return ref, ""
+    return match.group(1), match.group(2)
+
+
+def normalize_site_ref(ref: str) -> str:
+    if ref.startswith("/latest/"):
+        return ref[len("/latest/"):].lstrip("/")
+    if ref.startswith("/"):
+        return ref.lstrip("/")
+    return ref
+
+
+def normalize_relpath(target: Path, from_dir: Path) -> str:
     return Path(ospath.relpath(target, from_dir)).as_posix()
 
 
-  def candidate_paths(ref: str, md_rel: Path) -> list[Path]:
-    md_dir_html = html_dir / md_rel.parent
-    md_dir_build = build_src_dir / md_rel.parent
-    candidates = [
-      md_dir_html / ref,
-      md_dir_build / ref,
-      html_dir / ref,
-      build_src_dir / ref,
-      repo_root / ref,
-      repo_root / "doc" / ref,
-    ]
-
-    trimmed = ref
-    while trimmed.startswith("../"):
-      trimmed = trimmed[3:]
-      if not trimmed:
-        break
-      candidates.extend(
-        [
-          html_dir / trimmed,
-          build_src_dir / trimmed,
-          repo_root / trimmed,
-          repo_root / "doc" / trimmed,
-        ]
-      )
-
-    if trimmed.startswith("./"):
-      trimmed = trimmed[2:]
-      if trimmed:
-        candidates.extend(
-          [
-            html_dir / trimmed,
-            build_src_dir / trimmed,
-            repo_root / trimmed,
-            repo_root / "doc" / trimmed,
-          ]
-        )
-
+def dedupe_paths(paths):
     deduped = []
     seen = set()
-    for candidate in candidates:
-      try:
-        key = candidate.resolve(strict=False)
-      except OSError:
-        key = candidate
-      if key in seen:
-        continue
-      seen.add(key)
-      deduped.append(candidate)
+
+    for candidate in paths:
+        try:
+            key = candidate.resolve(strict=False)
+        except OSError:
+            key = candidate
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+
     return deduped
 
 
-  def resolve_asset(ref: str, md_rel: Path) -> Path | None:
-    clean_ref = ref.split("?", 1)[0].split("#", 1)[0]
+def candidate_paths(ref: str, md_rel: Path):
+    clean_ref = normalize_site_ref(ref)
+    md_dir_html = html_dir / md_rel.parent
+    md_dir_build = build_src_dir / md_rel.parent
+    candidates = []
+
+    for candidate_ref in (ref, clean_ref):
+        if not candidate_ref:
+            continue
+        candidates.extend(
+            [
+                md_dir_html / candidate_ref,
+                md_dir_build / candidate_ref,
+                html_dir / candidate_ref,
+                build_src_dir / candidate_ref,
+                repo_root / "doc" / candidate_ref,
+                repo_root / candidate_ref,
+            ]
+        )
+
+    basename = Path(clean_ref or ref).name
+    if basename:
+        candidates.extend(
+            [
+                html_dir / "_images" / basename,
+                build_src_dir / "_images" / basename,
+                repo_root / "doc" / "_static" / basename,
+                repo_root / "doc" / basename,
+            ]
+        )
+
+    return dedupe_paths(candidates)
+
+
+def resolve_asset(ref: str, md_rel: Path):
+    clean_ref, _suffix = split_ref(ref)
     if not clean_ref or is_external(clean_ref):
-      return None
+        return None
 
     for candidate in candidate_paths(clean_ref, md_rel):
-      if candidate.is_file():
-        return candidate.resolve()
+        if candidate.is_file():
+            return candidate.resolve()
+
     return None
 
 
-  def target_for_asset(asset: Path) -> Path:
-    for base in (repo_root, build_src_dir, html_dir):
-      try:
-        rel = asset.relative_to(base)
-        return markdown_dir / rel
-      except ValueError:
-        continue
+def target_for_asset(asset: Path) -> Path:
+    for base in (html_dir, build_src_dir, repo_root / "doc", repo_root):
+        try:
+            rel = asset.relative_to(base)
+            return markdown_dir / rel
+        except ValueError:
+            continue
+
     return markdown_dir / "_assets" / asset.name
 
 
-  def ensure_asset(asset: Path) -> Path:
+def ensure_asset(asset: Path) -> Path:
     existing = copied_assets.get(asset)
     if existing is not None:
-      return existing
+        return existing
 
     target = target_for_asset(asset)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -334,60 +418,121 @@ markdown_dir = Path(sys.argv[2])
     return target
 
 
-  def rewrite_images(text: str, md_rel: Path) -> str:
-    bundle_file = markdown_dir / md_rel
-    bundle_dir = bundle_file.parent
+def doc_candidates(ref: str, md_rel: Path):
+    clean_ref = normalize_site_ref(ref)
+    base_dir = md_rel.parent.as_posix()
+    raw_candidates = []
 
-    def replace_md(match: re.Match[str]) -> str:
-      alt_text, ref, suffix = match.groups()
-      asset = resolve_asset(ref, md_rel)
-      if asset is None:
-        return match.group(0)
-      target = ensure_asset(asset)
-      rel_ref = normalize_relpath(target, bundle_dir)
-      return f"![{alt_text}]({rel_ref}{suffix})"
+    if ref.startswith("/"):
+        raw_candidates.append(clean_ref)
+    else:
+        raw_candidates.append(ospath.normpath(ospath.join(base_dir, ref)))
+        if clean_ref != ref:
+            raw_candidates.append(clean_ref)
 
-    def replace_html(match: re.Match[str]) -> str:
-      prefix, ref, suffix = match.groups()
-      asset = resolve_asset(ref, md_rel)
-      if asset is None:
-        return match.group(0)
-      target = ensure_asset(asset)
-      rel_ref = normalize_relpath(target, bundle_dir)
-      return f"{prefix}{rel_ref}{suffix}"
+    candidates = []
+    seen = set()
+    for candidate in raw_candidates:
+        candidate = candidate.rstrip("/")
+        if candidate in ("", "."):
+            candidate = "index.html"
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        candidates.append(Path(candidate))
 
-    text = MD_IMAGE_RE.sub(replace_md, text)
-    text = HTML_IMAGE_RE.sub(replace_html, text)
+    return candidates
+
+
+def resolve_doc_target(ref: str, md_rel: Path):
+    clean_ref, suffix = split_ref(ref)
+    if not clean_ref or is_external(clean_ref):
+        return None
+
+    for candidate in doc_candidates(clean_ref, md_rel):
+        candidate_str = candidate.as_posix()
+
+        if candidate.suffix == ".html" and (html_dir / candidate).is_file():
+            return (markdown_dir / Path(f"{candidate_str}.md"), suffix)
+
+        if candidate.suffix == ".md" and (html_dir / candidate).is_file():
+            return (markdown_dir / candidate, suffix)
+
+        if candidate.suffix == "":
+            direct_page = html_dir / Path(f"{candidate_str}.html")
+            if direct_page.is_file():
+                return (markdown_dir / Path(f"{candidate_str}.html.md"), suffix)
+
+            index_page = html_dir / candidate / "index.html"
+            if index_page.is_file():
+                return (markdown_dir / candidate / "index.html.md", suffix)
+
+    return None
+
+
+def rewrite_markdown(text: str, md_rel: Path) -> str:
+    bundle_dir = (markdown_dir / md_rel).parent
+
+    def replace_md_image(match: re.Match[str]) -> str:
+        alt_text, ref, suffix = match.groups()
+        asset = resolve_asset(ref, md_rel)
+        if asset is None:
+            return match.group(0)
+        target = ensure_asset(asset)
+        rel_ref = normalize_relpath(target, bundle_dir)
+        return f"![{alt_text}]({rel_ref}{suffix})"
+
+    def replace_html_image(match: re.Match[str]) -> str:
+        prefix, ref, suffix = match.groups()
+        asset = resolve_asset(ref, md_rel)
+        if asset is None:
+            return match.group(0)
+        target = ensure_asset(asset)
+        rel_ref = normalize_relpath(target, bundle_dir)
+        return f"{prefix}{rel_ref}{suffix}"
+
+    def replace_md_link(match: re.Match[str]) -> str:
+        label, ref, suffix = match.groups()
+        resolved = resolve_doc_target(ref, md_rel)
+        if resolved is None:
+            return match.group(0)
+        target, anchor_suffix = resolved
+        rel_ref = normalize_relpath(target, bundle_dir)
+        return f"[{label}]({rel_ref}{anchor_suffix}{suffix})"
+
+    text = MD_IMAGE_RE.sub(replace_md_image, text)
+    text = HTML_IMAGE_RE.sub(replace_html_image, text)
+    text = MD_LINK_RE.sub(replace_md_link, text)
     return text
 
 
-  def sort_key(path: Path) -> tuple[int, str]:
+def sort_key(path: Path) -> tuple[int, str]:
     rel = path.relative_to(markdown_dir).as_posix()
     return (0 if rel == "index.html.md" else 1, rel)
 
 
-  for src in sorted(html_dir.rglob("*.md")):
+for src in sorted(html_dir.rglob("*.md")):
     if not src.is_file():
-      continue
+        continue
 
     rel_path = src.relative_to(html_dir)
     dst = markdown_dir / rel_path
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    rewritten = rewrite_images(src.read_text(encoding="utf-8"), rel_path)
+    rewritten = rewrite_markdown(src.read_text(encoding="utf-8"), rel_path)
     dst.write_text(rewritten, encoding="utf-8")
     page_files.append(dst)
 
-  llms_src = html_dir / "llms.txt"
-  if llms_src.is_file():
+llms_src = html_dir / "llms.txt"
+if llms_src.is_file():
     (markdown_dir / "llms.txt").write_text(llms_src.read_text(encoding="utf-8"), encoding="utf-8")
 
-  page_files.sort(key=sort_key)
-  with (markdown_dir / "llms-full.txt").open("w", encoding="utf-8") as llms_full_file:
+page_files.sort(key=sort_key)
+with (markdown_dir / "llms-full.txt").open("w", encoding="utf-8") as llms_full_file:
     for page in page_files:
-      rel_path = page.relative_to(markdown_dir).as_posix()
-      cleaned = page.read_text(encoding="utf-8").rstrip()
-      llms_full_file.write(f"# {rel_path}\n\n{cleaned}\n\n")
+        rel_path = page.relative_to(markdown_dir).as_posix()
+        cleaned = page.read_text(encoding="utf-8").rstrip()
+        llms_full_file.write(f"# {rel_path}\n\n{cleaned}\n\n")
 PYEOF
 
   tar -czf "${markdown_tar}" -C "${output_dir}" markdown
