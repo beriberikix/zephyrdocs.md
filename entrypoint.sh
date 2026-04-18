@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ $# -gt 0 ]]; then
+if [[ $# -gt 0 && ! ( $# -eq 1 && "$1" == "html" ) ]]; then
   echo ":: INFO: ignoring CLI targets; markdown tarball output is the only supported mode"
 fi
 

@@ -48,6 +48,17 @@ if [[ -z "${ZEPHYR_ROOT}" || -z "${OUTPUT_DIR}" ]]; then
   exit 1
 fi
 
+validate_archive_name() {
+    case "$1" in
+        ""|"."|".."|*/*|*\\*)
+            echo "Archive name must be a filename within OUTPUT_DIR: $1" >&2
+            exit 1
+            ;;
+    esac
+}
+
+validate_archive_name "${ARCHIVE_NAME}"
+
 DOC_DIR="${ZEPHYR_ROOT}/doc"
 BUILD_DIR="${DOC_DIR}/_build"
 ARCHIVE_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}"
@@ -340,9 +351,9 @@ export_markdown_bundle() {
   rm -rf "${markdown_dir}" "${archive_path}"
   mkdir -p "${markdown_dir}"
 
-  python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" <<'PYEOF'
+    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" <<'PYEOF'
 from os import path as ospath
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import sys
@@ -351,6 +362,12 @@ html_dir = Path(sys.argv[1])
 markdown_dir = Path(sys.argv[2])
 repo_root = Path(sys.argv[3])
 build_src_dir = Path(sys.argv[4])
+approved_bases = [
+    html_dir.resolve(),
+    build_src_dir.resolve(),
+    (repo_root / "doc").resolve(),
+    repo_root.resolve(),
+]
 
 copied_assets = {}
 page_files = []
@@ -379,6 +396,22 @@ def normalize_site_ref(ref: str) -> str:
     return ref
 
 
+def sanitize_workspace_ref(ref: str):
+    normalized = normalize_site_ref(ref)
+    if not normalized:
+        return None
+
+    pure = PurePosixPath(normalized)
+    if pure.is_absolute():
+        return None
+    if normalized in ("", "."):
+        return None
+    if any(part == ".." for part in pure.parts):
+        return None
+
+    return pure.as_posix()
+
+
 def normalize_relpath(target: Path, from_dir: Path) -> str:
     return Path(ospath.relpath(target, from_dir)).as_posix()
 
@@ -400,27 +433,34 @@ def dedupe_paths(paths):
     return deduped
 
 
+def is_under_approved_base(candidate: Path) -> bool:
+    for base in approved_bases:
+        try:
+            candidate.relative_to(base)
+            return True
+        except ValueError:
+            continue
+
+    return False
+
+
 def candidate_paths(ref: str, md_rel: Path):
-    clean_ref = normalize_site_ref(ref)
+    safe_ref = sanitize_workspace_ref(ref)
+    if safe_ref is None:
+        return []
+
     md_dir_html = html_dir / md_rel.parent
     md_dir_build = build_src_dir / md_rel.parent
-    candidates = []
+    candidates = [
+        md_dir_html / safe_ref,
+        md_dir_build / safe_ref,
+        html_dir / safe_ref,
+        build_src_dir / safe_ref,
+        repo_root / "doc" / safe_ref,
+        repo_root / safe_ref,
+    ]
 
-    for candidate_ref in (ref, clean_ref):
-        if not candidate_ref:
-            continue
-        candidates.extend(
-            [
-                md_dir_html / candidate_ref,
-                md_dir_build / candidate_ref,
-                html_dir / candidate_ref,
-                build_src_dir / candidate_ref,
-                repo_root / "doc" / candidate_ref,
-                repo_root / candidate_ref,
-            ]
-        )
-
-    basename = Path(clean_ref or ref).name
+    basename = Path(safe_ref).name
     if basename:
         candidates.extend(
             [
@@ -441,7 +481,9 @@ def resolve_asset(ref: str, md_rel: Path):
 
     for candidate in candidate_paths(clean_ref, md_rel):
         if candidate.is_file():
-            return candidate.resolve()
+            resolved = candidate.resolve()
+            if is_under_approved_base(resolved):
+                return resolved
 
     return None
 

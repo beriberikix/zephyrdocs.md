@@ -66,6 +66,50 @@ if [[ -z "${WORKSPACE_ROOT}" || -z "${ZEPHYR_REPO}" || -z "${ZEPHYR_REF}" ]]; th
   exit 1
 fi
 
+validate_workspace_root() {
+  python3 - "$1" <<'PYEOF'
+from pathlib import Path
+import sys
+
+raw = sys.argv[1].strip()
+if not raw:
+    raise SystemExit("WORKSPACE_ROOT must not be empty")
+
+workspace_root = Path(raw).expanduser()
+if not workspace_root.is_absolute():
+    raise SystemExit("WORKSPACE_ROOT must be an absolute path")
+
+resolved = workspace_root.resolve(strict=False)
+if resolved == Path("/"):
+    raise SystemExit("Refusing unsafe workspace root: /")
+if len(resolved.parts) < 3:
+    raise SystemExit(f"Refusing unsafe workspace root: {resolved}")
+if resolved.name in ("", ".", ".."):
+    raise SystemExit(f"Refusing unsafe workspace root: {resolved}")
+
+print(resolved)
+PYEOF
+}
+
+WORKSPACE_ROOT="$(validate_workspace_root "${WORKSPACE_ROOT}")"
+
+init_workspace() {
+  rm -rf "${WORKSPACE_ROOT}"
+  mkdir -p "$(dirname "${WORKSPACE_ROOT}")"
+  west init -m "${ZEPHYR_REPO}" --mr "${ZEPHYR_REF}" "${WORKSPACE_ROOT}"
+}
+
+set_west_config() {
+  local key="$1"
+  local value="$2"
+
+  if [[ -n "${value}" ]]; then
+    west config "${key}" -- "${value}"
+  else
+    west config -d "${key}" >/dev/null 2>&1 || true
+  fi
+}
+
 sync_manifest_repo() {
   (
     cd "${WORKSPACE_ROOT}/zephyr"
@@ -84,10 +128,12 @@ if [[ -d "${WORKSPACE_ROOT}/.west" && -d "${WORKSPACE_ROOT}/zephyr/.git" ]]; the
   fi
 fi
 
+if [[ "${MODE}" == "zephyr-only" ]]; then
+  workspace_ready=0
+fi
+
 if [[ "${workspace_ready}" != "1" ]]; then
-  rm -rf "${WORKSPACE_ROOT}"
-  mkdir -p "$(dirname "${WORKSPACE_ROOT}")"
-  west init -m "${ZEPHYR_REPO}" --mr "${ZEPHYR_REF}" "${WORKSPACE_ROOT}"
+  init_workspace
 fi
 
 case "${MODE}" in
@@ -98,12 +144,8 @@ case "${MODE}" in
     sync_manifest_repo
     (
       cd "${WORKSPACE_ROOT}"
-      if [[ -n "${GROUP_FILTER}" ]]; then
-        west config manifest.group-filter -- "${GROUP_FILTER}"
-      fi
-      if [[ -n "${PROJECT_FILTER}" ]]; then
-        west config manifest.project-filter -- "${PROJECT_FILTER}"
-      fi
+      set_west_config manifest.group-filter "${GROUP_FILTER}"
+      set_west_config manifest.project-filter "${PROJECT_FILTER}"
       west update -n -o=--depth=1
     )
     ;;
