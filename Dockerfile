@@ -60,14 +60,11 @@ RUN \
   doxygen \
   graphviz \
   librsvg2-bin \
-  texlive-latex-base \
-  texlive-latex-extra \
-  latexmk \
-  texlive-fonts-recommended \
   imagemagick
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY scripts /scripts
+RUN chmod +x /entrypoint.sh /scripts/*.sh
 
 VOLUME /output
 WORKDIR /docs/zephyrproject/zephyr/doc

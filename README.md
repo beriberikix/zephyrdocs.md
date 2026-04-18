@@ -1,16 +1,41 @@
-# zdocs — Reproducible Zephyr Documentation Builder
+# zdocs
 
-Containerized build environment for the [Zephyr Project](https://docs.zephyrproject.org/) documentation, following the official [Documentation Generation](https://docs.zephyrproject.org/latest/contribute/documentation/generation.html) guide.
+`zdocs` builds `sphinx-llm` markdown bundles for Zephyr documentation and publishes them as tarball artifacts. The repository now centers on a `workflow_dispatch` GitHub Action with an inline matrix of Zephyr repositories and refs, while keeping a Docker-backed local path for reproducing the same output.
 
-By default this project builds from the fork at `https://github.com/beriberikix/zephyr` on branch `docs/llms-txt`, which enables `sphinx-llm` output alongside the regular HTML documentation.
+## GitHub Action
 
-## Build the image
+The workflow in `.github/workflows/publish-markdown-tarballs.yml` runs one matrix job per Zephyr target and uploads one tarball artifact per job.
+
+Each matrix entry defines:
+
+- the Zephyr repository URL
+- the Zephyr ref to build
+- a repo slug and ref slug used in cache keys and artifact names
+
+Artifact filenames are distinguishable by design:
+
+```text
+<repo-slug>-<ref-slug>-markdown.tar.gz
+```
+
+The workflow is optimized for repeated runs:
+
+- Python packages are cached through `actions/cache`
+- the west workspace is cached per repo/ref so repeated runs only need to fetch the requested revision
+- the workflow uses a filtered `west update` with `-babblesim,-optional,-testing` to keep the checkout smaller while preserving the module layout Zephyr docs expect
+- `sphinx_llm.txt` is injected automatically for upstream Zephyr revisions that do not already enable markdown output
+
+To add another target, append a new `include` entry to the inline matrix.
+
+## Local Docker build
+
+Build the image:
 
 ```bash
 docker build -t zdocs .
 ```
 
-To build docs from a different Zephyr repo or branch:
+Override the source repo or ref when needed:
 
 ```bash
 docker build \
@@ -19,68 +44,40 @@ docker build \
   -t zdocs .
 ```
 
-## Generate documentation
-
-HTML (default):
+Run the markdown-only export:
 
 ```bash
-docker run -v $(pwd)/output:/output zdocs
+docker run \
+  -e MARKDOWN_TARBALL_NAME=zephyrproject-rtos-zephyr-v4-4-0-markdown.tar.gz \
+  -v $(pwd)/output:/output \
+  zdocs
 ```
 
-PDF:
+The container produces:
 
-```bash
-docker run -v $(pwd)/output:/output zdocs pdf
-```
+- `output/markdown/` for the rewritten markdown tree
+- `output/<name>.tar.gz` for the bundle artifact
 
-Both:
+Each run refreshes the markdown bundle in place and removes stale markdown-era outputs such as old tarballs or leftover `output/html/` and `output/pdf/` directories from earlier container runs.
 
-```bash
-docker run -v $(pwd)/output:/output zdocs html pdf
-```
-
-### Turbo mode environment variables
-
-For faster builds during iteration, you can skip expensive generation steps:
+Optional turbo-mode inputs still work during local builds:
 
 ```bash
 docker run \
   -e DT_TURBO_MODE=1 \
   -e HW_FEATURES_TURBO_MODE=1 \
-  -v $(pwd)/output:/output \
-  zdocs
-```
-
-To limit HW features to specific board vendors:
-
-```bash
-docker run \
   -e HW_FEATURES_VENDOR_FILTER=vendor1,vendor2 \
   -v $(pwd)/output:/output \
   zdocs
 ```
 
-## View the output
+## Direct script usage
 
-After building, serve the HTML docs locally:
+The reusable scripts are:
 
-```bash
-python3 -m http.server -d output/html
-```
+- `scripts/setup-zephyr-workspace.sh` to create or refresh a minimal west workspace for a chosen repo/ref
+- `scripts/build-markdown.sh` to configure Sphinx, normalize `sphinx-llm` output, rewrite asset links, and create the tarball
 
-Then open http://localhost:8000 in your browser.
+`scripts/setup-zephyr-workspace.sh` still supports a more aggressive `zephyr-only` mode for experimentation, but the workflow defaults to the filtered mode above because it is the safer choice for full documentation builds.
 
-PDF output is at `output/pdf/zephyr.pdf`.
-
-## Markdown output
-
-The build also exports `sphinx-llm` artifacts:
-
-- `output/html/llms.txt`
-- `output/html/llms-full.txt`
-- per-page markdown files under `output/html/**/*.html.md`
-
-In addition, the entrypoint creates a markdown-only bundle with rewritten image paths:
-
-- `output/markdown/` — markdown tree preserving the original folder layout
-- `output/markdown.tar.gz` — tarball of the markdown tree and copied image assets
+That split keeps the GitHub workflow and the local Docker path on the same build logic.
