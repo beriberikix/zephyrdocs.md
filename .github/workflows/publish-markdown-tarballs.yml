@@ -10,7 +10,6 @@ on:
         type: choice
         options:
           - all
-          - beriberikix-zephyr-docs-llms-txt
           - zephyrproject-rtos-zephyr-main
           - zephyrproject-rtos-zephyr-v4-4-0
 
@@ -31,11 +30,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - repo: https://github.com/beriberikix/zephyr
-            ref: docs/llms-txt
-            repo_slug: beriberikix-zephyr
-            ref_slug: docs-llms-txt
-            target_slug: beriberikix-zephyr-docs-llms-txt
           - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: main
             repo_slug: zephyrproject-rtos-zephyr

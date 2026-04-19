@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
-ARG ZEPHYR_REPO=https://github.com/beriberikix/zephyr
-ARG ZEPHYR_VERSION=docs/llms-txt
+ARG ZEPHYR_REPO=https://github.com/zephyrproject-rtos/zephyr
+ARG ZEPHYR_VERSION=main
 
 # OS dependencies and packages
 

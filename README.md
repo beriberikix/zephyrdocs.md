@@ -1,6 +1,6 @@
 # zdocs
 
-`zdocs` builds `sphinx-llm` markdown bundles for Zephyr documentation and publishes them as tarball artifacts. The repository now centers on a `workflow_dispatch` GitHub Action with an inline matrix of Zephyr repositories and refs, while keeping a Docker-backed local path for reproducing the same output.
+`zdocs` builds `sphinx-llm` markdown bundles for Zephyr documentation and publishes them as tarball artifacts. The repository now centers on a `workflow_dispatch` GitHub Action with an inline matrix of upstream Zephyr refs, while keeping a Docker-backed local path for reproducing the same output.
 
 ## GitHub Action
 
@@ -38,6 +38,8 @@ Build the image:
 docker build -t zdocs .
 ```
 
+Without overrides, the image builds against `zephyrproject-rtos/zephyr` at `main`.
+
 Override the source repo or ref when needed:
 
 ```bash
@@ -51,7 +53,7 @@ Run the markdown-only export:
 
 ```bash
 docker run \
-  -e MARKDOWN_TARBALL_NAME=zephyrproject-rtos-zephyr-v4-4-0-markdown.tar.gz \
+  -e MARKDOWN_TARBALL_NAME=zephyrproject-rtos-zephyr-main-markdown.tar.gz \
   -v $(pwd)/output:/output \
   zdocs
 ```
