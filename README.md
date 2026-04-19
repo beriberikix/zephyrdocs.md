@@ -25,6 +25,7 @@ The workflow is optimized for repeated runs:
 - Python packages are cached per target and per checked-out Zephyr `doc/requirements.txt`
 - the west workspace is cached per repo/ref so repeated runs only need to fetch the requested revision
 - the workflow uses a filtered `west update` with `-babblesim,-optional,-testing` to keep the checkout smaller while preserving the module layout Zephyr docs expect
+- CI enables `DT_TURBO_MODE=1` and `HW_FEATURES_TURBO_MODE=1` by default so markdown tarball runs skip the slowest doc-generation paths that are not needed for the published artifact
 - `sphinx_llm.txt` is injected automatically for upstream Zephyr revisions that do not already enable markdown output
 
 To add another target, append a new `include` entry to the inline matrix and add its slug to the `workflow_dispatch` `target` options.

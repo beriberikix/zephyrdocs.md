@@ -18,6 +18,8 @@ permissions:
   contents: read
 
 env:
+  DT_TURBO_MODE: "1"
+  HW_FEATURES_TURBO_MODE: "1"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUNBUFFERED: "1"
 
