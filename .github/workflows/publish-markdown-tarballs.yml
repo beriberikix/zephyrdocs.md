@@ -2,6 +2,17 @@ name: Publish markdown tarballs
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Zephyr target to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - beriberikix-zephyr-docs-llms-txt
+          - zephyrproject-rtos-zephyr-main
+          - zephyrproject-rtos-zephyr-v4-4-0
 
 permissions:
   contents: read
@@ -22,14 +33,17 @@ jobs:
             ref: docs/llms-txt
             repo_slug: beriberikix-zephyr
             ref_slug: docs-llms-txt
+            target_slug: beriberikix-zephyr-docs-llms-txt
           - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: main
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: main
+            target_slug: zephyrproject-rtos-zephyr-main
           - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: v4.4.0
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: v4-4-0
+            target_slug: zephyrproject-rtos-zephyr-v4-4-0
     env:
       WORKSPACE_ROOT: ${{ github.workspace }}/.cache/west/${{ matrix.repo_slug }}/${{ matrix.ref_slug }}
       OUTPUT_DIR: ${{ github.workspace }}/out/${{ matrix.repo_slug }}-${{ matrix.ref_slug }}
@@ -37,28 +51,24 @@ jobs:
 
     steps:
       - name: Check out zdocs
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Create virtual environment
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           python -m venv .venv
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
           echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/.venv" >> "${GITHUB_ENV}"
 
-      - name: Cache Python packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-zdocs-${{ hashFiles('.github/workflows/publish-markdown-tarballs.yml') }}-${{ matrix.repo_slug }}
-          restore-keys: |
-            ${{ runner.os }}-pip-zdocs-${{ hashFiles('.github/workflows/publish-markdown-tarballs.yml') }}-
-
       - name: Cache Zephyr workspace
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         uses: actions/cache@v4
         with:
           path: ${{ env.WORKSPACE_ROOT }}
@@ -67,6 +77,7 @@ jobs:
             ${{ runner.os }}-west-zdocs-${{ hashFiles('scripts/build-markdown.sh', 'scripts/setup-zephyr-workspace.sh', '.github/workflows/publish-markdown-tarballs.yml') }}-${{ matrix.repo_slug }}-
 
       - name: Install host dependencies
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -78,9 +89,11 @@ jobs:
             imagemagick
 
       - name: Install Python tooling
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: python -m pip install --upgrade pip wheel "west>=1,<2"
 
       - name: Prepare Zephyr workspace
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           scripts/setup-zephyr-workspace.sh \
             --workspace-root "${WORKSPACE_ROOT}" \
@@ -89,13 +102,68 @@ jobs:
             --mode filtered \
             --group-filter "-babblesim,-optional,-testing"
 
-      - name: Install Zephyr docs dependencies
+      - name: Hash Zephyr doc requirements
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        id: requirements-hash
+        run: |
+          requirements_hash="$(sha256sum "${WORKSPACE_ROOT}/zephyr/doc/requirements.txt" | awk '{print $1}')"
+          echo "value=${requirements_hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Python package cache
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        id: restore-python-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-zdocs-${{ matrix.target_slug }}-${{ steps.requirements-hash.outputs.value }}
+          restore-keys: |
+            ${{ runner.os }}-pip-zdocs-${{ matrix.target_slug }}-
+
+      - name: Log Python environment
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        run: |
+          python --version
+          python -m pip --version
+          west --version
+          {
+            echo "## Tooling"
+            echo ""
+            echo "- target: ${{ matrix.target_slug }}"
+            echo "- python: $(python --version 2>&1)"
+            echo "- pip: $(python -m pip --version)"
+            echo "- west: $(west --version)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Install west package requirements
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           cd "${WORKSPACE_ROOT}"
           west packages pip --install
-          python -m pip install -r zephyr/doc/requirements.txt sphinx-llm
+
+      - name: Install Zephyr doc requirements
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        run: |
+          cd "${WORKSPACE_ROOT}"
+          python -m pip install -r zephyr/doc/requirements.txt
+
+      - name: Install sphinx-llm
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        run: python -m pip install sphinx-llm
+
+      - name: Log resolved doc tool versions
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        run: |
+          python -m pip show west Sphinx sphinx-llm docutils | sed '/^$/d'
+
+      - name: Save Python package cache
+        if: ${{ (inputs.target == 'all' || inputs.target == matrix.target_slug) && steps.restore-python-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-zdocs-${{ matrix.target_slug }}-${{ steps.requirements-hash.outputs.value }}
 
       - name: Build markdown tarball
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           scripts/build-markdown.sh \
             --zephyr-root "${WORKSPACE_ROOT}/zephyr" \
@@ -103,6 +171,7 @@ jobs:
             --archive-name "${ARCHIVE_NAME}"
 
       - name: Record artifact digest
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           checksum="$(sha256sum "${OUTPUT_DIR}/${ARCHIVE_NAME}")"
           {
@@ -115,6 +184,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload markdown tarball
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.repo_slug }}-${{ matrix.ref_slug }}-markdown

@@ -6,6 +6,8 @@
 
 The workflow in `.github/workflows/publish-markdown-tarballs.yml` runs one matrix job per Zephyr target and uploads one tarball artifact per job.
 
+Manual runs can execute either all configured targets or one selected target through the `target` input on `workflow_dispatch`. Use a single target during troubleshooting so failures stay isolated to one repo/ref at a time.
+
 Each matrix entry defines:
 
 - the Zephyr repository URL
@@ -20,12 +22,12 @@ Artifact filenames are distinguishable by design:
 
 The workflow is optimized for repeated runs:
 
-- Python packages are cached through `actions/cache`
+- Python packages are cached per target and per checked-out Zephyr `doc/requirements.txt`
 - the west workspace is cached per repo/ref so repeated runs only need to fetch the requested revision
 - the workflow uses a filtered `west update` with `-babblesim,-optional,-testing` to keep the checkout smaller while preserving the module layout Zephyr docs expect
 - `sphinx_llm.txt` is injected automatically for upstream Zephyr revisions that do not already enable markdown output
 
-To add another target, append a new `include` entry to the inline matrix.
+To add another target, append a new `include` entry to the inline matrix and add its slug to the `workflow_dispatch` `target` options.
 
 ## Local Docker build
 
