@@ -14,7 +14,7 @@ on:
           - zephyrproject-rtos-zephyr-v4-4-0
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   DT_TURBO_MODE: "1"
@@ -186,3 +186,22 @@ jobs:
           name: ${{ matrix.repo_slug }}-${{ matrix.ref_slug }}-markdown
           path: ${{ env.OUTPUT_DIR }}/${{ env.ARCHIVE_NAME }}
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ matrix.repo_slug }}-${{ matrix.ref_slug }}"
+          TITLE="Zephyr docs: ${{ matrix.repo_slug }} @ ${{ matrix.ref }}"
+          NOTES="LLM-optimised Zephyr documentation markdown tarball built from \`${{ matrix.repo }}\` at ref \`${{ matrix.ref }}\`."
+
+          # Create or update the release (idempotent)
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            gh release upload "${TAG}" "${OUTPUT_DIR}/${ARCHIVE_NAME}" --clobber
+          else
+            gh release create "${TAG}" \
+              --title "${TITLE}" \
+              --notes "${NOTES}" \
+              "${OUTPUT_DIR}/${ARCHIVE_NAME}"
+          fi
