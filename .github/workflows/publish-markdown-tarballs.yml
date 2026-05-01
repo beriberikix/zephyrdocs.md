@@ -11,6 +11,11 @@ on:
         options:
           - all
           - zephyrproject-rtos-zephyr-main
+          - zephyrproject-rtos-zephyr-v3-7-0
+          - zephyrproject-rtos-zephyr-v4-0-0
+          - zephyrproject-rtos-zephyr-v4-1-0
+          - zephyrproject-rtos-zephyr-v4-2-0
+          - zephyrproject-rtos-zephyr-v4-3-0
           - zephyrproject-rtos-zephyr-v4-4-0
 
 permissions:
@@ -35,15 +40,46 @@ jobs:
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: main
             target_slug: zephyrproject-rtos-zephyr-main
+            version: main
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v3.7.0
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v3-7-0
+            target_slug: zephyrproject-rtos-zephyr-v3-7-0
+            version: v3.7.0
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.0.0
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-0-0
+            target_slug: zephyrproject-rtos-zephyr-v4-0-0
+            version: v4.0.0
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.1.0
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-1-0
+            target_slug: zephyrproject-rtos-zephyr-v4-1-0
+            version: v4.1.0
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.2.0
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-2-0
+            target_slug: zephyrproject-rtos-zephyr-v4-2-0
+            version: v4.2.0
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.3.0
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-3-0
+            target_slug: zephyrproject-rtos-zephyr-v4-3-0
+            version: v4.3.0
           - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: v4.4.0
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: v4-4-0
             target_slug: zephyrproject-rtos-zephyr-v4-4-0
+            version: v4.4.0
     env:
       WORKSPACE_ROOT: ${{ github.workspace }}/.cache/west/${{ matrix.repo_slug }}/${{ matrix.ref_slug }}
       OUTPUT_DIR: ${{ github.workspace }}/out/${{ matrix.repo_slug }}-${{ matrix.ref_slug }}
-      ARCHIVE_NAME: ${{ matrix.repo_slug }}-${{ matrix.ref_slug }}-markdown.tar.gz
 
     steps:
       - name: Check out zdocs
@@ -97,6 +133,19 @@ jobs:
             --zephyr-ref "${{ matrix.ref }}" \
             --mode filtered \
             --group-filter "-babblesim,-optional,-testing"
+
+      - name: Set archive name
+        if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
+        id: set-archive-name
+        run: |
+          if [[ "${{ matrix.version }}" == "main" ]]; then
+            sha="$(git -C "${WORKSPACE_ROOT}/zephyr" rev-parse --short HEAD)"
+            artifact_name="zephyrdocs-main-${sha}"
+          else
+            artifact_name="zephyrdocs-${{ matrix.version }}"
+          fi
+          echo "artifact_name=${artifact_name}" >> "${GITHUB_OUTPUT}"
+          echo "archive_name=${artifact_name}.tar.gz" >> "${GITHUB_OUTPUT}"
 
       - name: Hash Zephyr doc requirements
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
@@ -164,18 +213,18 @@ jobs:
           scripts/build-markdown.sh \
             --zephyr-root "${WORKSPACE_ROOT}/zephyr" \
             --output-dir "${OUTPUT_DIR}" \
-            --archive-name "${ARCHIVE_NAME}"
+            --archive-name "${{ steps.set-archive-name.outputs.archive_name }}"
 
       - name: Record artifact digest
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
-          checksum="$(sha256sum "${OUTPUT_DIR}/${ARCHIVE_NAME}")"
+          checksum="$(sha256sum "${OUTPUT_DIR}/${{ steps.set-archive-name.outputs.archive_name }}")"
           {
             echo "## Markdown tarball"
             echo ""
             echo "- source repo: ${{ matrix.repo }}"
             echo "- source ref: ${{ matrix.ref }}"
-            echo "- artifact: ${ARCHIVE_NAME}"
+            echo "- artifact: ${{ steps.set-archive-name.outputs.archive_name }}"
             echo "- sha256: ${checksum%% *}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -183,8 +232,8 @@ jobs:
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.repo_slug }}-${{ matrix.ref_slug }}-markdown
-          path: ${{ env.OUTPUT_DIR }}/${{ env.ARCHIVE_NAME }}
+          name: ${{ steps.set-archive-name.outputs.artifact_name }}
+          path: ${{ env.OUTPUT_DIR }}/${{ steps.set-archive-name.outputs.archive_name }}
           if-no-files-found: error
 
       - name: Publish GitHub Release
