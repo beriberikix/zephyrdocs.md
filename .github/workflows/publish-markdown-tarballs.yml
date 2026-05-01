@@ -183,7 +183,12 @@ jobs:
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
           cd "${WORKSPACE_ROOT}"
-          west packages pip --install
+          if west help packages > /dev/null 2>&1; then
+            west packages pip --install
+          else
+            # west packages was introduced in Zephyr v4.0; fall back for older releases
+            pip install -r zephyr/scripts/requirements-base.txt
+          fi
 
       - name: Install Zephyr doc requirements
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
