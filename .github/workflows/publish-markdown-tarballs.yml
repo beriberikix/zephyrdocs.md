@@ -245,12 +245,14 @@ jobs:
           TITLE="Zephyr docs: ${{ matrix.repo_slug }} @ ${{ matrix.ref }}"
           NOTES="LLM-optimised Zephyr documentation markdown tarball built from \`${{ matrix.repo }}\` at ref \`${{ matrix.ref }}\`."
 
+          ARCHIVE="${OUTPUT_DIR}/${{ steps.set-archive-name.outputs.archive_name }}"
+
           # Create or update the release (idempotent)
           if gh release view "${TAG}" > /dev/null 2>&1; then
-            gh release upload "${TAG}" "${OUTPUT_DIR}/${ARCHIVE_NAME}" --clobber
+            gh release upload "${TAG}" "${ARCHIVE}" --clobber
           else
             gh release create "${TAG}" \
               --title "${TITLE}" \
               --notes "${NOTES}" \
-              "${OUTPUT_DIR}/${ARCHIVE_NAME}"
+              "${ARCHIVE}"
           fi
