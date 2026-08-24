@@ -215,10 +215,26 @@ jobs:
       - name: Build markdown tarball
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
         run: |
+          # Assets are not carried in the bundle, so image references are
+          # rewritten to the published docs. Only upstream Zephyr is served from
+          # docs.zephyrproject.org; for any other repo leave the base empty so
+          # the references are left exactly as they are today.
+          docs_base=""
+          if [[ "${{ matrix.repo }}" == "https://github.com/zephyrproject-rtos/zephyr" ]]; then
+            version="${{ matrix.version }}"
+            if [[ "${version}" == "main" ]]; then
+              docs_base="https://docs.zephyrproject.org/latest"
+            else
+              docs_base="https://docs.zephyrproject.org/${version#v}"
+            fi
+          fi
+          echo ":: docs base URL: ${docs_base:-<none>}"
+
           scripts/build-markdown.sh \
             --zephyr-root "${WORKSPACE_ROOT}/zephyr" \
             --output-dir "${OUTPUT_DIR}" \
-            --archive-name "${{ steps.set-archive-name.outputs.archive_name }}"
+            --archive-name "${{ steps.set-archive-name.outputs.archive_name }}" \
+            --docs-base-url "${docs_base}"
 
       - name: Record artifact digest
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}

@@ -9,6 +9,10 @@ Options:
   --zephyr-root PATH      Path to the Zephyr repository root.
   --output-dir PATH       Directory that receives markdown/ and the tarball.
   --archive-name NAME     Output tarball filename. Defaults to markdown.tar.gz.
+  --docs-base-url URL     Published docs base for this ref, e.g.
+                          https://docs.zephyrproject.org/4.4.0. When set,
+                          image and other asset references are rewritten to
+                          absolute URLs under it instead of being bundled.
   -h, --help              Show this help text.
 EOF
 }
@@ -16,6 +20,7 @@ EOF
 ZEPHYR_ROOT=""
 OUTPUT_DIR=""
 ARCHIVE_NAME="markdown.tar.gz"
+DOCS_BASE_URL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +34,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --archive-name)
       ARCHIVE_NAME="$2"
+      shift 2
+      ;;
+    --docs-base-url)
+      DOCS_BASE_URL="$2"
       shift 2
       ;;
     -h|--help)
@@ -183,6 +192,11 @@ INLINE_BULLET_RE = re.compile(r"(?<!\n)\s+\*\s+(?=(?:\[|[A-Za-z0-9`]))")
 ADJACENT_IMAGE_RE = re.compile(r"\)(?=!\[)")
 
 
+def bundle_name(rel: str) -> str:
+    """sphinx-llm writes "<page>.html.md"; the bundle ships "<page>.md"."""
+    return rel[: -len(".html.md")] + ".md" if rel.endswith(".html.md") else rel
+
+
 def sort_key(path: Path) -> tuple[int, str]:
     rel = path.relative_to(html_dir).as_posix()
     return (0 if rel == "index.html.md" else 1, rel)
@@ -324,7 +338,7 @@ with llms_path.open("w", encoding="utf-8") as llms_file:
     llms_file.write("## Pages\n\n")
 
     for path in md_files:
-        rel_path = path.relative_to(html_dir).as_posix()
+        rel_path = bundle_name(path.relative_to(html_dir).as_posix())
         cleaned = cleaned_by_path[path]
         title = extract_title(cleaned, path)
         desc = extract_description(cleaned)
@@ -333,7 +347,7 @@ with llms_path.open("w", encoding="utf-8") as llms_file:
 llms_full_path = html_dir / "llms-full.txt"
 with llms_full_path.open("w", encoding="utf-8") as llms_full_file:
     for path in md_files:
-        rel_path = path.relative_to(html_dir).as_posix()
+        rel_path = bundle_name(path.relative_to(html_dir).as_posix())
         cleaned = cleaned_by_path[path].rstrip()
         llms_full_file.write(f"# {rel_path}\n\n{cleaned}\n\n")
 PYEOF
@@ -351,7 +365,7 @@ export_markdown_bundle() {
   rm -rf "${markdown_dir}" "${archive_path}"
   mkdir -p "${markdown_dir}"
 
-    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" <<'PYEOF'
+    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" "${DOCS_BASE_URL}" <<'PYEOF'
 from os import path as ospath
 from pathlib import Path, PurePosixPath
 import re
@@ -362,6 +376,7 @@ html_dir = Path(sys.argv[1])
 markdown_dir = Path(sys.argv[2])
 repo_root = Path(sys.argv[3])
 build_src_dir = Path(sys.argv[4])
+docs_base_url = (sys.argv[5] if len(sys.argv) > 5 else "").rstrip("/")
 approved_bases = [
     html_dir.resolve(),
     build_src_dir.resolve(),
@@ -379,6 +394,41 @@ HTML_IMAGE_RE = re.compile(r'(<img\b[^>]*?\bsrc=["\'])([^"\']+)(["\'])', re.IGNO
 
 def is_external(ref: str) -> bool:
     return ref.startswith(("http://", "https://", "data:", "mailto:", "#"))
+
+
+def docs_asset_url(ref: str, md_rel: Path) -> str | None:
+    """Absolute URL for an asset reference, relative to the published docs.
+
+    Sphinx emits asset references relative to the page, e.g.
+    "../../../../_images/board.jpg". Those files are not carried in this
+    bundle, so a relative path resolves to nothing; point at the published
+    copy instead, which costs no bundle size.
+    """
+    if not docs_base_url or is_external(ref):
+        return None
+
+    target, suffix = split_ref(ref)
+    if not target:
+        return None
+
+    resolved = ospath.normpath(ospath.join(md_rel.parent.as_posix(), target))
+    if resolved.startswith("..") or resolved in ("", "."):
+        return None
+
+    return f"{docs_base_url}/{PurePosixPath(resolved).as_posix()}{suffix}"
+
+
+def bundle_page(rel: Path) -> Path:
+    """sphinx-llm writes "<page>.html.md"; the bundle ships "<page>.md".
+
+    sphinx-llm also emits cross-references as "<page>.md", so keeping the
+    double extension on disk left every internal link pointing at a file that
+    was never written.
+    """
+    text = rel.as_posix()
+    if text.endswith(".html.md"):
+        return Path(text[: -len(".html.md")] + ".md")
+    return rel
 
 
 def split_ref(ref: str) -> tuple[str, str]:
@@ -546,19 +596,26 @@ def resolve_doc_target(ref: str, md_rel: Path):
         candidate_str = candidate.as_posix()
 
         if candidate.suffix == ".html" and (html_dir / candidate).is_file():
-            return (markdown_dir / Path(f"{candidate_str}.md"), suffix)
+            return (markdown_dir / bundle_page(Path(f"{candidate_str}.md")), suffix)
 
-        if candidate.suffix == ".md" and (html_dir / candidate).is_file():
-            return (markdown_dir / candidate, suffix)
+        # sphinx-llm emits references as "<page>.md" while generating
+        # "<page>.html.md", so look for the generated name too.
+        if candidate.suffix == ".md":
+            if (html_dir / candidate).is_file():
+                return (markdown_dir / candidate, suffix)
+
+            generated = Path(f"{candidate_str[: -len('.md')]}.html.md")
+            if (html_dir / generated).is_file():
+                return (markdown_dir / bundle_page(generated), suffix)
 
         if candidate.suffix == "":
             direct_page = html_dir / Path(f"{candidate_str}.html")
             if direct_page.is_file():
-                return (markdown_dir / Path(f"{candidate_str}.html.md"), suffix)
+                return (markdown_dir / bundle_page(Path(f"{candidate_str}.html.md")), suffix)
 
             index_page = html_dir / candidate / "index.html"
             if index_page.is_file():
-                return (markdown_dir / candidate / "index.html.md", suffix)
+                return (markdown_dir / candidate / "index.md", suffix)
 
     return None
 
@@ -568,6 +625,9 @@ def rewrite_markdown(text: str, md_rel: Path) -> str:
 
     def replace_md_image(match: re.Match[str]) -> str:
         alt_text, ref, suffix = match.groups()
+        external = docs_asset_url(ref, md_rel)
+        if external is not None:
+            return f"![{alt_text}]({external}{suffix})"
         asset = resolve_asset(ref, md_rel)
         if asset is None:
             return match.group(0)
@@ -577,6 +637,9 @@ def rewrite_markdown(text: str, md_rel: Path) -> str:
 
     def replace_html_image(match: re.Match[str]) -> str:
         prefix, ref, suffix = match.groups()
+        external = docs_asset_url(ref, md_rel)
+        if external is not None:
+            return f"{prefix}{external}{suffix}"
         asset = resolve_asset(ref, md_rel)
         if asset is None:
             return match.group(0)
@@ -588,6 +651,11 @@ def rewrite_markdown(text: str, md_rel: Path) -> str:
         label, ref, suffix = match.groups()
         resolved = resolve_doc_target(ref, md_rel)
         if resolved is None:
+            clean_ref, _ = split_ref(ref)
+            if clean_ref and PurePosixPath(clean_ref).suffix.lower() not in ("", ".md", ".html"):
+                external = docs_asset_url(ref, md_rel)
+                if external is not None:
+                    return f"[{label}]({external}{suffix})"
             return match.group(0)
         target, anchor_suffix = resolved
         rel_ref = normalize_relpath(target, bundle_dir)
@@ -601,7 +669,7 @@ def rewrite_markdown(text: str, md_rel: Path) -> str:
 
 def sort_key(path: Path) -> tuple[int, str]:
     rel = path.relative_to(markdown_dir).as_posix()
-    return (0 if rel == "index.html.md" else 1, rel)
+    return (0 if rel == "index.md" else 1, rel)
 
 
 for src in sorted(html_dir.rglob("*.md")):
@@ -609,7 +677,7 @@ for src in sorted(html_dir.rglob("*.md")):
         continue
 
     rel_path = src.relative_to(html_dir)
-    dst = markdown_dir / rel_path
+    dst = markdown_dir / bundle_page(rel_path)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     rewritten = rewrite_markdown(src.read_text(encoding="utf-8"), rel_path)
