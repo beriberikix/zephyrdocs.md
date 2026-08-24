@@ -25,7 +25,23 @@ The workflow is optimized for repeated runs:
 - Python packages are cached per target and per checked-out Zephyr `doc/requirements.txt`
 - the west workspace is cached per repo/ref so repeated runs only need to fetch the requested revision
 - the workflow uses a filtered `west update` with `-babblesim,-optional,-testing` to keep the checkout smaller while preserving the module layout Zephyr docs expect
-- CI enables `DT_TURBO_MODE=1` and `HW_FEATURES_TURBO_MODE=1` by default so markdown tarball runs skip the slowest doc-generation paths that are not needed for the published artifact
+- CI enables `DT_TURBO_MODE=1` and `HW_FEATURES_TURBO_MODE=1` by default so markdown tarball runs skip the slowest doc-generation paths
+
+The two turbo modes skip generated content, which keeps a run to roughly 15
+minutes but leaves visible gaps in the bundle:
+
+| Input | Turbo skips | Effect on the bundle |
+| --- | --- | --- |
+| `devicetree_bindings` | `build/dts/api/bindings/**` | board pages link into these pages, so those links dangle |
+
+Enabling `devicetree_bindings` adds roughly 2,700 binding pages, taking a
+v4.2.0 bundle from about 2,400 pages to about 5,100, and takes longer to build.
+
+`HW_FEATURES_TURBO_MODE` stays on. The per-board supported-hardware tables are
+derived from each board's devicetree, harvested by configuring every board,
+which needs target toolchains that neither the workflow nor the Docker image
+provisions. Turning it off today only spends build time: the board pages still
+show the feature legend with no table under it.
 - `sphinx_llm.txt` is injected automatically for upstream Zephyr revisions that do not already enable markdown output
 
 To add another target, append a new `include` entry to the inline matrix and add its slug to the `workflow_dispatch` `target` options.

@@ -17,12 +17,24 @@ on:
           - zephyrproject-rtos-zephyr-v4-2-0
           - zephyrproject-rtos-zephyr-v4-3-0
           - zephyrproject-rtos-zephyr-v4-4-0
-
+      devicetree_bindings:
+        description: >-
+          Include the generated devicetree binding pages. Off is faster;
+          board pages link into these, so those links dangle without them.
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: write
 
 env:
-  DT_TURBO_MODE: "1"
+  # "Turbo" skips generated content. These default to the historical fast
+  # build; set the matching workflow inputs to include the content instead.
+  DT_TURBO_MODE: ${{ inputs.devicetree_bindings && '0' || '1' }}
+  # Left on: the per-board hardware tables are derived from each board's
+  # devicetree, harvested by configuring every board, which needs target
+  # toolchains that nothing here provisions. Turning this off today just
+  # spends build time and still emits the legend with no table under it.
   HW_FEATURES_TURBO_MODE: "1"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUNBUFFERED: "1"
