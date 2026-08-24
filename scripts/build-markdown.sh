@@ -411,11 +411,20 @@ def docs_asset_url(ref: str, md_rel: Path) -> str | None:
     if not target:
         return None
 
-    resolved = ospath.normpath(ospath.join(md_rel.parent.as_posix(), target))
-    if resolved.startswith("..") or resolved in ("", "."):
+    page_relative = ospath.normpath(ospath.join(md_rel.parent.as_posix(), target))
+    root_relative = ospath.normpath(target)
+
+    # Prefer whichever spelling names a file the build actually produced.
+    for candidate in (page_relative, root_relative):
+        if candidate.startswith("..") or candidate in ("", "."):
+            continue
+        if (html_dir / candidate).exists():
+            return f"{docs_base_url}/{PurePosixPath(candidate).as_posix()}{suffix}"
+
+    if page_relative.startswith("..") or page_relative in ("", "."):
         return None
 
-    return f"{docs_base_url}/{PurePosixPath(resolved).as_posix()}{suffix}"
+    return f"{docs_base_url}/{PurePosixPath(page_relative).as_posix()}{suffix}"
 
 
 def bundle_page(rel: Path) -> Path:
@@ -602,7 +611,9 @@ def resolve_doc_target(ref: str, md_rel: Path):
         # "<page>.html.md", so look for the generated name too.
         if candidate.suffix == ".md":
             if (html_dir / candidate).is_file():
-                return (markdown_dir / candidate, suffix)
+                # The reference may already be spelled "<page>.html.md"; the
+                # bundle ships it renamed either way.
+                return (markdown_dir / bundle_page(candidate), suffix)
 
             generated = Path(f"{candidate_str[: -len('.md')]}.html.md")
             if (html_dir / generated).is_file():
@@ -625,11 +636,11 @@ def rewrite_markdown(text: str, md_rel: Path) -> str:
 
     def replace_md_image(match: re.Match[str]) -> str:
         alt_text, ref, suffix = match.groups()
-        external = docs_asset_url(ref, md_rel)
-        if external is not None:
-            return f"![{alt_text}]({external}{suffix})"
         asset = resolve_asset(ref, md_rel)
         if asset is None:
+            external = docs_asset_url(ref, md_rel)
+            if external is not None:
+                return f"![{alt_text}]({external}{suffix})"
             return match.group(0)
         target = ensure_asset(asset)
         rel_ref = normalize_relpath(target, bundle_dir)
@@ -637,11 +648,11 @@ def rewrite_markdown(text: str, md_rel: Path) -> str:
 
     def replace_html_image(match: re.Match[str]) -> str:
         prefix, ref, suffix = match.groups()
-        external = docs_asset_url(ref, md_rel)
-        if external is not None:
-            return f"{prefix}{external}{suffix}"
         asset = resolve_asset(ref, md_rel)
         if asset is None:
+            external = docs_asset_url(ref, md_rel)
+            if external is not None:
+                return f"{prefix}{external}{suffix}"
             return match.group(0)
         target = ensure_asset(asset)
         rel_ref = normalize_relpath(target, bundle_dir)
