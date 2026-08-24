@@ -9,6 +9,8 @@ Options:
   --zephyr-root PATH      Path to the Zephyr repository root.
   --output-dir PATH       Directory that receives markdown/ and the tarball.
   --archive-name NAME     Output tarball filename. Defaults to markdown.tar.gz.
+  --zephyr-repo URL       Source repository recorded in the bundle manifest.
+  --zephyr-ref REF        Source ref recorded in the bundle manifest.
   --doc-version VERSION   Version recorded in each page's front matter, e.g.
                           v4.4.0. Front matter is only emitted when set.
   --docs-base-url URL     Published docs base for this ref, e.g.
@@ -24,6 +26,8 @@ OUTPUT_DIR=""
 ARCHIVE_NAME="markdown.tar.gz"
 DOCS_BASE_URL=""
 DOC_VERSION=""
+ZEPHYR_REPO=""
+ZEPHYR_REF=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,6 +49,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --doc-version)
       DOC_VERSION="$2"
+      shift 2
+      ;;
+    --zephyr-repo)
+      ZEPHYR_REPO="$2"
+      shift 2
+      ;;
+    --zephyr-ref)
+      ZEPHYR_REF="$2"
       shift 2
       ;;
     -h|--help)
@@ -372,9 +384,10 @@ export_markdown_bundle() {
   rm -rf "${markdown_dir}" "${archive_path}"
   mkdir -p "${markdown_dir}"
 
-    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" "${DOCS_BASE_URL}" "${DOC_VERSION}" <<'PYEOF'
+    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" "${DOCS_BASE_URL}" "${DOC_VERSION}" "${ZEPHYR_REPO}" "${ZEPHYR_REF}" <<'PYEOF'
 from os import path as ospath
 from pathlib import Path, PurePosixPath
+import json
 import re
 import shutil
 import sys
@@ -385,6 +398,8 @@ repo_root = Path(sys.argv[3])
 build_src_dir = Path(sys.argv[4])
 docs_base_url = (sys.argv[5] if len(sys.argv) > 5 else "").rstrip("/")
 doc_version = sys.argv[6] if len(sys.argv) > 6 else ""
+zephyr_repo = sys.argv[7] if len(sys.argv) > 7 else ""
+zephyr_ref = sys.argv[8] if len(sys.argv) > 8 else ""
 approved_bases = [
     html_dir.resolve(),
     build_src_dir.resolve(),
@@ -734,6 +749,20 @@ for src in sorted(html_dir.rglob("*.md")):
     rewritten = rewrite_markdown(src.read_text(encoding="utf-8"), rel_path)
     dst.write_text(front_matter(rel_path) + rewritten, encoding="utf-8")
     page_files.append(dst)
+
+manifest = {
+    "schema": 1,
+    "version": doc_version,
+    "zephyr_repo": zephyr_repo,
+    "zephyr_ref": zephyr_ref,
+    "docs_base_url": docs_base_url,
+    "page_count": len(page_files),
+    "pages_root": ".",
+}
+(markdown_dir / "manifest.json").write_text(
+    json.dumps({k: v for k, v in manifest.items() if v != ""}, indent=2) + "\n",
+    encoding="utf-8",
+)
 
 llms_src = html_dir / "llms.txt"
 if llms_src.is_file():

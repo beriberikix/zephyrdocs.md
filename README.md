@@ -14,6 +14,23 @@ Each matrix entry defines:
 - the Zephyr ref to build
 - a repo slug and ref slug used in cache keys and artifact names
 
+Each bundle carries a `manifest.json` at its root describing what it is:
+
+```json
+{
+  "schema": 1,
+  "version": "v4.4.0",
+  "zephyr_repo": "https://github.com/zephyrproject-rtos/zephyr",
+  "zephyr_ref": "v4.4.0",
+  "docs_base_url": "https://docs.zephyrproject.org/4.4.0",
+  "page_count": 2364,
+  "pages_root": "."
+}
+```
+
+Consumers should read the version from there rather than parsing it out of
+the artifact filename or the release tag.
+
 Artifact filenames are distinguishable by design:
 
 ```text
