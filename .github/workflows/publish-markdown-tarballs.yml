@@ -234,7 +234,8 @@ jobs:
             --zephyr-root "${WORKSPACE_ROOT}/zephyr" \
             --output-dir "${OUTPUT_DIR}" \
             --archive-name "${{ steps.set-archive-name.outputs.archive_name }}" \
-            --docs-base-url "${docs_base}"
+            --docs-base-url "${docs_base}" \
+            --doc-version "${{ matrix.version }}"
 
       - name: Record artifact digest
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}

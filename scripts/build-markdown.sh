@@ -9,6 +9,8 @@ Options:
   --zephyr-root PATH      Path to the Zephyr repository root.
   --output-dir PATH       Directory that receives markdown/ and the tarball.
   --archive-name NAME     Output tarball filename. Defaults to markdown.tar.gz.
+  --doc-version VERSION   Version recorded in each page's front matter, e.g.
+                          v4.4.0. Front matter is only emitted when set.
   --docs-base-url URL     Published docs base for this ref, e.g.
                           https://docs.zephyrproject.org/4.4.0. When set,
                           image and other asset references are rewritten to
@@ -21,6 +23,7 @@ ZEPHYR_ROOT=""
 OUTPUT_DIR=""
 ARCHIVE_NAME="markdown.tar.gz"
 DOCS_BASE_URL=""
+DOC_VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --docs-base-url)
       DOCS_BASE_URL="$2"
+      shift 2
+      ;;
+    --doc-version)
+      DOC_VERSION="$2"
       shift 2
       ;;
     -h|--help)
@@ -365,7 +372,7 @@ export_markdown_bundle() {
   rm -rf "${markdown_dir}" "${archive_path}"
   mkdir -p "${markdown_dir}"
 
-    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" "${DOCS_BASE_URL}" <<'PYEOF'
+    python3 - "${html_dir}" "${markdown_dir}" "${repo_root}" "${build_src_dir}" "${DOCS_BASE_URL}" "${DOC_VERSION}" <<'PYEOF'
 from os import path as ospath
 from pathlib import Path, PurePosixPath
 import re
@@ -377,6 +384,7 @@ markdown_dir = Path(sys.argv[2])
 repo_root = Path(sys.argv[3])
 build_src_dir = Path(sys.argv[4])
 docs_base_url = (sys.argv[5] if len(sys.argv) > 5 else "").rstrip("/")
+doc_version = sys.argv[6] if len(sys.argv) > 6 else ""
 approved_bases = [
     html_dir.resolve(),
     build_src_dir.resolve(),
@@ -425,6 +433,38 @@ def docs_asset_url(ref: str, md_rel: Path) -> str | None:
         return None
 
     return f"{docs_base_url}/{PurePosixPath(page_relative).as_posix()}{suffix}"
+
+
+def yaml_scalar(value: str) -> str:
+    """Quote a front-matter value only when YAML would otherwise misread it."""
+    if value and not any(c in value for c in ':#\'"\n') and value.strip() == value:
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def front_matter(rel: Path) -> str:
+    """Provenance header, so a retrieved page can be cited.
+
+    Records the Zephyr version the page was built from, where it is published,
+    and the path it came from. Emitted only when --doc-version is given.
+    """
+    if not doc_version:
+        return ""
+
+    original = rel.as_posix()
+    if original.endswith(".html.md"):
+        original = original[: -len(".md")]
+
+    lines = [
+        "---",
+        f"version: {yaml_scalar(doc_version)}",
+    ]
+    if docs_base_url:
+        lines.append(f"source_url: {yaml_scalar(f'{docs_base_url}/{original}')}")
+    lines.append(f"original_path: {yaml_scalar(original)}")
+    lines.append("---")
+    return "\n".join(lines) + "\n\n"
 
 
 def bundle_page(rel: Path) -> Path:
@@ -692,7 +732,7 @@ for src in sorted(html_dir.rglob("*.md")):
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     rewritten = rewrite_markdown(src.read_text(encoding="utf-8"), rel_path)
-    dst.write_text(rewritten, encoding="utf-8")
+    dst.write_text(front_matter(rel_path) + rewritten, encoding="utf-8")
     page_files.append(dst)
 
 llms_src = html_dir / "llms.txt"
