@@ -52,7 +52,10 @@ RUN \
   pip install -U -r ./zephyrproject/zephyr/doc/requirements.txt
 
 # llms.txt generation (https://github.com/NVIDIA/sphinx-llm)
-RUN pip install sphinx-llm
+# Pinned: the build patches Zephyr's hardware-feature gate to recognise
+# sphinx-llm's "llms-markdown" sub-build, so an unpinned upgrade could
+# silently change the builder name or tag this depends on.
+RUN pip install sphinx-llm==1.0.0
 
 RUN \
   apt-get -y update \
