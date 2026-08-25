@@ -55,13 +55,30 @@ minutes but leaves visible gaps in the bundle:
 Enabling `devicetree_bindings` adds roughly 2,700 binding pages, taking a
 v4.2.0 bundle from about 2,400 pages to about 5,100.
 
-`hardware_features` additionally needs a Zephyr SDK. Those tables are derived
-from each board's devicetree, which the build harvests by configuring every
-board with twister; without target toolchains twister fails in
-`verify-toolchain.cmake` and the tables come out empty. The workflow installs
-the SDK on demand via `scripts/install-zephyr-sdk.sh`, reading the version from
-the Zephyr tree's `SDK_VERSION`. That is roughly a 2GB download, so it only
-happens when the input is on.
+`hardware_features` needs two things. Those tables are derived from each
+board's devicetree, which the build harvests by configuring every board with
+twister; without target toolchains twister fails in `verify-toolchain.cmake`
+and the tables come out empty. The workflow installs the SDK on demand via
+`scripts/install-zephyr-sdk.sh`, reading the version from the Zephyr tree's
+`SDK_VERSION`. That is roughly a 2GB download, so it only happens when the
+input is on.
+
+The SDK alone is not enough. sphinx-llm does not convert the HTML build: it
+spawns a second `sphinx-build -b llms-markdown` subprocess, and that sub-build
+produces every page we ship. Zephyr gates hardware-feature generation on the
+builder format being `html`, so the sub-build skipped it while the twister run
+happened in the HTML build whose output we discard. `patch_hw_features_gate` in
+`scripts/build-markdown.sh` teaches the gate about the markdown builder and
+keys the config off the `sphinx_llm_markdown` tag, moving generation into the
+sub-build so twister still runs once. Measured on v4.2.0: board pages carrying
+a Type/Location/Description/Compatible table go from 0 to 621.
+
+The patch is a no-op on releases that predate hardware features (v3.7.0,
+v4.0.0). `sphinx-llm` is pinned because the patch depends on its builder name
+and tag.
+
+Known gap: `HW_FEATURES_VENDOR_FILTER` does not reach twister on this path, so
+enabling the input always harvests every board rather than the named vendors.
 
 For the local Docker path, build with `--build-arg INSTALL_ZEPHYR_SDK=1`.
 
