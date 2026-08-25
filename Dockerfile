@@ -66,6 +66,15 @@ COPY entrypoint.sh /entrypoint.sh
 COPY scripts /scripts
 RUN chmod +x /entrypoint.sh /scripts/*.sh
 
+# Zephyr SDK, only when the hardware feature tables are wanted. Those are
+# derived from each board's devicetree, harvested by configuring every board
+# with twister, which fails in verify-toolchain.cmake without target
+# toolchains. The SDK adds several GB to the image, so it is opt-in.
+ARG INSTALL_ZEPHYR_SDK=0
+RUN if [ "$INSTALL_ZEPHYR_SDK" = "1" ]; then \
+      /scripts/install-zephyr-sdk.sh --zephyr-root /docs/zephyrproject/zephyr; \
+    fi
+
 VOLUME /output
 WORKDIR /docs/zephyrproject/zephyr/doc
 

@@ -50,15 +50,22 @@ minutes but leaves visible gaps in the bundle:
 | Input | Turbo skips | Effect on the bundle |
 | --- | --- | --- |
 | `devicetree_bindings` | `build/dts/api/bindings/**` | board pages link into these pages, so those links dangle |
+| `hardware_features` | per-board supported-hardware tables | board pages show the feature legend with no table under it |
 
 Enabling `devicetree_bindings` adds roughly 2,700 binding pages, taking a
-v4.2.0 bundle from about 2,400 pages to about 5,100, and takes longer to build.
+v4.2.0 bundle from about 2,400 pages to about 5,100.
 
-`HW_FEATURES_TURBO_MODE` stays on. The per-board supported-hardware tables are
-derived from each board's devicetree, harvested by configuring every board,
-which needs target toolchains that neither the workflow nor the Docker image
-provisions. Turning it off today only spends build time: the board pages still
-show the feature legend with no table under it.
+`hardware_features` additionally needs a Zephyr SDK. Those tables are derived
+from each board's devicetree, which the build harvests by configuring every
+board with twister; without target toolchains twister fails in
+`verify-toolchain.cmake` and the tables come out empty. The workflow installs
+the SDK on demand via `scripts/install-zephyr-sdk.sh`, reading the version from
+the Zephyr tree's `SDK_VERSION`. That is roughly a 2GB download, so it only
+happens when the input is on.
+
+For the local Docker path, build with `--build-arg INSTALL_ZEPHYR_SDK=1`.
+
+Both inputs make the run substantially longer.
 - `sphinx_llm.txt` is injected automatically for upstream Zephyr revisions that do not already enable markdown output
 
 To add another target, append a new `include` entry to the inline matrix and add its slug to the `workflow_dispatch` `target` options.
