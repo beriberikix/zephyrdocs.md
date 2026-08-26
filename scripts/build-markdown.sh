@@ -216,6 +216,54 @@ print(f":: binding type titles: patched {path}")
 PYEOF
 }
 
+patch_markdown_node_coverage() {
+  # sphinx_markdown_builder warns "unknown node type" and then raises
+  # SkipNode, which drops the node AND its children. A section title whose
+  # only child is such a node therefore renders empty, and the markdown
+  # sub-build aborts on "AssertionError: Empty title".
+  #
+  # abbreviation (:abbr:`ADC (...)`) is the one that actually bites: it
+  # appears in v4.4.x devicetree binding headings and in the Doxygen API
+  # pages. Descending into it instead renders the abbreviation text, which
+  # is what HTML shows; only the tooltip is lost. caption is added for the
+  # same reason -- figure and code-block captions are otherwise dropped.
+  python3 - "${DOC_DIR}/conf.py" <<'PYEOF'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+MARKER = "# -- markdown builder node coverage"
+
+BLOCK = '''
+
+# -- markdown builder node coverage ------------------------------------------
+# Added by zdocs. sphinx_markdown_builder skips nodes it has no handler for,
+# children included, so a title made only of one renders empty and trips its
+# "Empty title" assertion. Descend into them instead.
+try:
+    from sphinx_markdown_builder.translator import MarkdownTranslator as _ZdocsMT
+
+    def _zdocs_descend(self, node):
+        """Render the children; add no markup of our own."""
+
+    for _zdocs_node in ("abbreviation", "caption"):
+        if not hasattr(_ZdocsMT, f"visit_{_zdocs_node}"):
+            setattr(_ZdocsMT, f"visit_{_zdocs_node}", _zdocs_descend)
+            setattr(_ZdocsMT, f"depart_{_zdocs_node}", _zdocs_descend)
+except ImportError:
+    pass
+'''
+
+text = path.read_text(encoding="utf-8")
+if MARKER in text:
+    print(":: markdown node coverage: already patched")
+    raise SystemExit(0)
+
+path.write_text(text + BLOCK, encoding="utf-8")
+print(f":: markdown node coverage: patched {path}")
+PYEOF
+}
+
 prepare_markdown_conf() {
   mkdir -p "${BUILD_DIR}/src"
   python3 - "${DOC_DIR}/conf.py" "${BUILD_DIR}/src/conf.py" <<'PYEOF'
@@ -890,6 +938,7 @@ reset_output_dir
 inject_sphinx_llm
 patch_hw_features_gate
 patch_binding_type_titles
+patch_markdown_node_coverage
 
 echo ":: Configuring build with cmake..."
 cmake_cmd=(cmake -GNinja -B"${BUILD_DIR}")
