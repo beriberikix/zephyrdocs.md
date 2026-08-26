@@ -172,6 +172,50 @@ for path, old, new, label in (
 PYEOF
 }
 
+patch_binding_type_titles() {
+  # v4.4.0 taught the devicetree binding generator to render acronym type
+  # names as ":abbr:`ADC (Analog to Digital Converter)`". For a type that is
+  # nothing but an acronym that becomes a section title whose only child is
+  # an abbreviation node, and sphinx_markdown_builder has no handler for
+  # those -- it skips the node, the title renders empty, and the markdown
+  # sub-build dies on "AssertionError: Empty title" while writing
+  # build/dts/api/bindings.
+  #
+  # Render the acronym as plain "ABBR (explanation)" text instead. That is
+  # what plain_name() already does for sorting, and it keeps name()'s
+  # capitalize() fallback for types the map does not cover. The tooltip is
+  # lost, which only affects the HTML build we discard.
+  python3 - "${DOC_DIR}/_scripts/gen_devicetree_rest.py" <<'PYEOF'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+OLD = """                    f":abbr:`{chunk[\'abbr\']} ({chunk[\'explanation\']})`"
+"""
+NEW = """                    f"{chunk[\'abbr\']} ({chunk[\'explanation\']})"
+"""
+
+if not path.exists():
+    print(":: binding type titles: generator not found, skipping")
+    raise SystemExit(0)
+
+text = path.read_text(encoding="utf-8")
+if NEW in text:
+    print(":: binding type titles: already patched")
+    raise SystemExit(0)
+
+count = text.count(OLD)
+if count == 0:
+    # Releases before the acronym rendering landed (through v4.3.x).
+    print(":: binding type titles: no acronym rendering, nothing to patch")
+    raise SystemExit(0)
+if count != 1:
+    raise SystemExit(f"binding type titles: expected 1 occurrence, found {count}")
+path.write_text(text.replace(OLD, NEW), encoding="utf-8")
+print(f":: binding type titles: patched {path}")
+PYEOF
+}
+
 prepare_markdown_conf() {
   mkdir -p "${BUILD_DIR}/src"
   python3 - "${DOC_DIR}/conf.py" "${BUILD_DIR}/src/conf.py" <<'PYEOF'
@@ -845,6 +889,7 @@ fi
 reset_output_dir
 inject_sphinx_llm
 patch_hw_features_gate
+patch_binding_type_titles
 
 echo ":: Configuring build with cmake..."
 cmake_cmd=(cmake -GNinja -B"${BUILD_DIR}")
