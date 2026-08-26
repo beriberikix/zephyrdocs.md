@@ -247,7 +247,9 @@ jobs:
             --output-dir "${OUTPUT_DIR}" \
             --archive-name "${{ steps.set-archive-name.outputs.archive_name }}" \
             --docs-base-url "${docs_base}" \
-            --doc-version "${{ matrix.version }}"
+            --doc-version "${{ matrix.version }}" \
+            --zephyr-repo "${{ matrix.repo }}" \
+            --zephyr-ref "${{ matrix.ref }}"
 
       - name: Record artifact digest
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}
