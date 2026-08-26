@@ -124,6 +124,54 @@ conf_path.write_text(text, encoding="utf-8")
 PYEOF
 }
 
+patch_hw_features_gate() {
+  # sphinx-llm builds the Markdown we ship in a *second* sphinx-build
+  # subprocess ("-b llms-markdown"), whose builder format is "markdown".
+  # Zephyr gates hardware-feature generation on the format being "html",
+  # so the shipped Markdown gets the explanatory legend with no table
+  # under it, while the twister run that produces the data happens in the
+  # HTML build whose output we discard. Teach the gate about the Markdown
+  # builder, and move generation to the sub-build so twister runs once.
+  python3 - "${DOC_DIR}/_extensions/zephyr/domain/__init__.py" "${DOC_DIR}/conf.py" <<'PYEOF'
+from pathlib import Path
+import sys
+
+domain_path, conf_path = Path(sys.argv[1]), Path(sys.argv[2])
+
+GATE_OLD = 'app.builder.format == "html" and app.config.zephyr_generate_hw_features'
+GATE_NEW = (
+    'app.builder.format in ("html", "markdown")\n'
+    "            and app.config.zephyr_generate_hw_features"
+)
+CONF_OLD = 'zephyr_generate_hw_features = not tags.has("hw_features_turbo")'
+CONF_NEW = (
+    'zephyr_generate_hw_features = not tags.has("hw_features_turbo") '
+    'and tags.has("sphinx_llm_markdown")'
+)
+
+for path, old, new, label in (
+    (domain_path, GATE_OLD, GATE_NEW, "builder-format gate"),
+    (conf_path, CONF_OLD, CONF_NEW, "hw-features config"),
+):
+    if not path.exists():
+        print(f":: {label}: {path} not found, skipping")
+        continue
+    text = path.read_text(encoding="utf-8")
+    if new.split("\n")[0] in text:
+        print(f":: {label}: already patched")
+        continue
+    count = text.count(old)
+    if count == 0:
+        # Releases predating hardware features (v3.7.0, v4.0.0).
+        print(f":: {label}: pattern absent, nothing to patch")
+        continue
+    if count != 1:
+        raise SystemExit(f"{label}: expected 1 occurrence in {path}, found {count}")
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    print(f":: {label}: patched {path}")
+PYEOF
+}
+
 prepare_markdown_conf() {
   mkdir -p "${BUILD_DIR}/src"
   python3 - "${DOC_DIR}/conf.py" "${BUILD_DIR}/src/conf.py" <<'PYEOF'
@@ -796,6 +844,7 @@ fi
 
 reset_output_dir
 inject_sphinx_llm
+patch_hw_features_gate
 
 echo ":: Configuring build with cmake..."
 cmake_cmd=(cmake -GNinja -B"${BUILD_DIR}")

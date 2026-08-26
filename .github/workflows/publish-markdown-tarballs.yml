@@ -17,6 +17,13 @@ on:
           - zephyrproject-rtos-zephyr-v4-2-0
           - zephyrproject-rtos-zephyr-v4-3-0
           - zephyrproject-rtos-zephyr-v4-4-0
+      hardware_features:
+        description: >-
+          Include the per-board supported-hardware tables. Requires a Zephyr
+          SDK, which this installs on demand (~2GB), and is much slower.
+        required: false
+        default: false
+        type: boolean
       devicetree_bindings:
         description: >-
           Include the generated devicetree binding pages. Off is faster;
@@ -31,11 +38,7 @@ env:
   # "Turbo" skips generated content. These default to the historical fast
   # build; set the matching workflow inputs to include the content instead.
   DT_TURBO_MODE: ${{ inputs.devicetree_bindings && '0' || '1' }}
-  # Left on: the per-board hardware tables are derived from each board's
-  # devicetree, harvested by configuring every board, which needs target
-  # toolchains that nothing here provisions. Turning this off today just
-  # spends build time and still emits the legend with no table under it.
-  HW_FEATURES_TURBO_MODE: "1"
+  HW_FEATURES_TURBO_MODE: ${{ inputs.hardware_features && '0' || '1' }}
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUNBUFFERED: "1"
 
@@ -223,6 +226,14 @@ jobs:
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-zdocs-${{ matrix.target_slug }}-${{ steps.requirements-hash.outputs.value }}
+
+      - name: Install Zephyr SDK
+        if: ${{ inputs.hardware_features && (inputs.target == 'all' || inputs.target == matrix.target_slug) }}
+        run: |
+          # Only needed for the hardware feature tables: twister configures
+          # every board to harvest its devicetree, and fails in
+          # verify-toolchain.cmake without target toolchains.
+          scripts/install-zephyr-sdk.sh --zephyr-root "${WORKSPACE_ROOT}/zephyr"
 
       - name: Build markdown tarball
         if: ${{ inputs.target == 'all' || inputs.target == matrix.target_slug }}

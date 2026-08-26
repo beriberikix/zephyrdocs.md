@@ -52,7 +52,10 @@ RUN \
   pip install -U -r ./zephyrproject/zephyr/doc/requirements.txt
 
 # llms.txt generation (https://github.com/NVIDIA/sphinx-llm)
-RUN pip install sphinx-llm
+# Pinned: the build patches Zephyr's hardware-feature gate to recognise
+# sphinx-llm's "llms-markdown" sub-build, so an unpinned upgrade could
+# silently change the builder name or tag this depends on.
+RUN pip install sphinx-llm==1.0.0
 
 RUN \
   apt-get -y update \
@@ -65,6 +68,15 @@ RUN \
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts /scripts
 RUN chmod +x /entrypoint.sh /scripts/*.sh
+
+# Zephyr SDK, only when the hardware feature tables are wanted. Those are
+# derived from each board's devicetree, harvested by configuring every board
+# with twister, which fails in verify-toolchain.cmake without target
+# toolchains. The SDK adds several GB to the image, so it is opt-in.
+ARG INSTALL_ZEPHYR_SDK=0
+RUN if [ "$INSTALL_ZEPHYR_SDK" = "1" ]; then \
+      /scripts/install-zephyr-sdk.sh --zephyr-root /docs/zephyrproject/zephyr; \
+    fi
 
 VOLUME /output
 WORKDIR /docs/zephyrproject/zephyr/doc
