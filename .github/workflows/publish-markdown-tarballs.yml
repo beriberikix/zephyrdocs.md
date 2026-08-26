@@ -12,11 +12,18 @@ on:
           - all
           - zephyrproject-rtos-zephyr-main
           - zephyrproject-rtos-zephyr-v3-7-0
+          - zephyrproject-rtos-zephyr-v3-7-1
+          - zephyrproject-rtos-zephyr-v3-7-2
           - zephyrproject-rtos-zephyr-v4-0-0
           - zephyrproject-rtos-zephyr-v4-1-0
           - zephyrproject-rtos-zephyr-v4-2-0
+          - zephyrproject-rtos-zephyr-v4-2-1
+          - zephyrproject-rtos-zephyr-v4-2-2
           - zephyrproject-rtos-zephyr-v4-3-0
+          - zephyrproject-rtos-zephyr-v4-3-1
           - zephyrproject-rtos-zephyr-v4-4-0
+          - zephyrproject-rtos-zephyr-v4-4-1
+          - zephyrproject-rtos-zephyr-v4-4-2
       hardware_features:
         description: >-
           Include the per-board supported-hardware tables. Requires a Zephyr
@@ -63,6 +70,18 @@ jobs:
             target_slug: zephyrproject-rtos-zephyr-v3-7-0
             version: v3.7.0
           - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v3.7.1
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v3-7-1
+            target_slug: zephyrproject-rtos-zephyr-v3-7-1
+            version: v3.7.1
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v3.7.2
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v3-7-2
+            target_slug: zephyrproject-rtos-zephyr-v3-7-2
+            version: v3.7.2
+          - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: v4.0.0
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: v4-0-0
@@ -81,17 +100,47 @@ jobs:
             target_slug: zephyrproject-rtos-zephyr-v4-2-0
             version: v4.2.0
           - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.2.1
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-2-1
+            target_slug: zephyrproject-rtos-zephyr-v4-2-1
+            version: v4.2.1
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.2.2
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-2-2
+            target_slug: zephyrproject-rtos-zephyr-v4-2-2
+            version: v4.2.2
+          - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: v4.3.0
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: v4-3-0
             target_slug: zephyrproject-rtos-zephyr-v4-3-0
             version: v4.3.0
           - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.3.1
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-3-1
+            target_slug: zephyrproject-rtos-zephyr-v4-3-1
+            version: v4.3.1
+          - repo: https://github.com/zephyrproject-rtos/zephyr
             ref: v4.4.0
             repo_slug: zephyrproject-rtos-zephyr
             ref_slug: v4-4-0
             target_slug: zephyrproject-rtos-zephyr-v4-4-0
             version: v4.4.0
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.4.1
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-4-1
+            target_slug: zephyrproject-rtos-zephyr-v4-4-1
+            version: v4.4.1
+          - repo: https://github.com/zephyrproject-rtos/zephyr
+            ref: v4.4.2
+            repo_slug: zephyrproject-rtos-zephyr
+            ref_slug: v4-4-2
+            target_slug: zephyrproject-rtos-zephyr-v4-4-2
+            version: v4.4.2
     env:
       WORKSPACE_ROOT: ${{ github.workspace }}/.cache/west/${{ matrix.repo_slug }}/${{ matrix.ref_slug }}
       OUTPUT_DIR: ${{ github.workspace }}/out/${{ matrix.repo_slug }}-${{ matrix.ref_slug }}
